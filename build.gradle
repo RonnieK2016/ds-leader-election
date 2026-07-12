@@ -9,6 +9,19 @@ repositories {
     mavenCentral()
 }
 
+jar {
+    manifest {
+        attributes(
+                'Main-Class': 'com.udemy.distrsystems.LeaderElection'
+        )
+    }
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE // Required in newer Gradle versions
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}
+
 dependencies {
     implementation 'org.apache.zookeeper:zookeeper:3.8.6'
     compileOnly "org.projectlombok:lombok:${lombokVersion}"
