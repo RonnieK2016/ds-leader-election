@@ -14,7 +14,6 @@ public class LeaderElection implements Watcher {
     public static final String ZOOKEEPER_ADDRESS = "127.0.0.1:2181";
     public static final int ZOOKEEPER_SESSION_TIMEOUT = 3000;
     public static final String ELECTION_NAMESPACE = "/election";
-    private String electedLeader;
 
     private ZooKeeper zk;
     private String zNodeIdx;
@@ -23,7 +22,7 @@ public class LeaderElection implements Watcher {
         LeaderElection leaderElection = new LeaderElection();
         leaderElection.connectZookeeper();
         leaderElection.volunteerForLeadership();
-        leaderElection.electLeader();
+        leaderElection.reElectLeader();
         leaderElection.run();
         leaderElection.close();
         log.info("Exiting LeaderElection");
@@ -36,25 +35,23 @@ public class LeaderElection implements Watcher {
         this.zNodeIdx = zNodeFullPath.replace(ELECTION_NAMESPACE + "/", "");
     }
 
-    public void electLeader() throws InterruptedException, KeeperException {
-        List<String> children = zk.getChildren(ELECTION_NAMESPACE, false);
-        Collections.sort(children);
-        String smallestChild = children.get(0);
-        if (smallestChild.equals(zNodeIdx)) {
-            log.info("Current node is the leader");
-            return;
+    public void reElectLeader() throws InterruptedException, KeeperException {
+        Stat predecessorStat = null;
+        while (predecessorStat == null) {
+            List<String> children = zk.getChildren(ELECTION_NAMESPACE, false);
+            Collections.sort(children);
+            String smallestChild = children.get(0);
+            if (smallestChild.equals(zNodeIdx)) {
+                log.info("Current node is the leader");
+                return;
+            } else {
+                int predecessorIdx = Collections.binarySearch(children, zNodeIdx) - 1;
+                String predecessorName = children.get(predecessorIdx);
+                predecessorStat = zk.exists(ELECTION_NAMESPACE + "/" + predecessorName, this);
+                log.info("Current node is not the leader, watching - {}", predecessorName);
+            }
         }
-
-        this.electedLeader = smallestChild;
-        watchLeader();
-        log.info("Current node is not the leader. Leader is {}", smallestChild);
     }
-
-    public void watchLeader() throws InterruptedException, KeeperException {
-        Stat leaderNodeExists = zk.exists(ELECTION_NAMESPACE + "/" + this.electedLeader, this);
-        log.info("Received stat on leader node {}.", leaderNodeExists);
-    }
-
     public void connectZookeeper() throws IOException {
         this.zk = new ZooKeeper(ZOOKEEPER_ADDRESS, ZOOKEEPER_SESSION_TIMEOUT, this);
     }
@@ -93,7 +90,11 @@ public class LeaderElection implements Watcher {
                 log.info("Zookeeper node created - {}", event);
                 break;
             case NodeDeleted:
-                log.info("Zookeeper node deleted - {}", event);
+                try {
+                    reElectLeader();
+                } catch (InterruptedException | KeeperException e) {
+                    throw new RuntimeException(e);
+                }
         }
     }
 }
